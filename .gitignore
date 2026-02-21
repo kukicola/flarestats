@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust / Cargo
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Environment / secrets
+.env
+.env.*
+
+# Claude Code
+.claude/settings.local.json
+
+# Tauri debug
+src-tauri/gen/
