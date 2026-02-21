@@ -1,7 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import Chart from "chart.js/auto";
 import type { TooltipModel } from "chart.js";
 import { formatNumber, formatTimestamp, escapeAttr } from "./utils";
@@ -87,8 +85,10 @@ async function init() {
     showDashboard();
   }
 
-  getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-    if (focused && currentView === "dashboard") {
+  // NSPanel doesn't trigger Tauri's onFocusChanged, use DOM focus event
+  window.addEventListener("focus", () => {
+    (document.activeElement as HTMLElement)?.blur();
+    if (currentView === "dashboard") {
       loadAnalytics();
     }
   });
@@ -159,7 +159,6 @@ async function loadAnalytics() {
     const data = await invoke<SiteData[]>("fetch_analytics");
     cachedData = data;
     renderSites(data);
-    await resizeWindow();
   } catch (e) {
     if (!cachedData) {
       content.innerHTML = `
@@ -428,18 +427,5 @@ function escapeHtml(s: string): string {
   return div.innerHTML;
 }
 
-async function resizeWindow() {
-  const inner = document.getElementById("sites-inner");
-  const header = document.querySelector(".header") as HTMLElement;
-  const content = document.getElementById("dashboard-content");
-  if (!inner || !header || !content) return;
-  const arrow = 10;
-  const appPadding = 10;
-  const headerHeight = header.offsetHeight + 1;
-  const contentPadding = parseFloat(getComputedStyle(content).paddingTop) + parseFloat(getComputedStyle(content).paddingBottom);
-  const needed = arrow + headerHeight + inner.offsetHeight + contentPadding + appPadding;
-  const height = Math.min(600, Math.ceil(needed));
-  await getCurrentWindow().setSize(new LogicalSize(420, height));
-}
 
 init();

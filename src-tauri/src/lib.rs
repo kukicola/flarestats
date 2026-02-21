@@ -1,17 +1,93 @@
 mod commands;
 
+use std::sync::Mutex;
 use tauri::{
-    Emitter, Manager,
+    Emitter, Manager, PhysicalPosition, PhysicalSize,
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
-use tauri_plugin_positioner::{Position, WindowExt};
+
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt};
+
+struct TrayRect(Mutex<Option<(PhysicalPosition<f64>, PhysicalSize<f64>)>>);
+
+#[cfg(target_os = "macos")]
+tauri_panel! {
+    panel!(FlareStatsPanel {
+        config: {
+            can_become_key_window: true,
+            is_floating_panel: true
+        }
+    })
+
+    panel_event!(FlareStatsPanelEventHandler {
+        window_did_resign_key(notification: &NSNotification) -> ()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn init_panel(app: &tauri::AppHandle) {
+    let window = app.get_webview_window("main").unwrap();
+    let panel = window.to_panel::<FlareStatsPanel>().unwrap();
+
+    panel.set_has_shadow(false);
+    panel.set_opaque(false);
+    panel.set_level(PanelLevel::MainMenu.value() + 1);
+    panel.set_collection_behavior(
+        CollectionBehavior::new()
+            .move_to_active_space()
+            .full_screen_auxiliary()
+            .value(),
+    );
+    panel.set_style_mask(StyleMask::empty().nonactivating_panel().value());
+
+    let event_handler = FlareStatsPanelEventHandler::new();
+    let handle = app.clone();
+    event_handler.window_did_resign_key(move |_notification| {
+        if let Ok(panel) = handle.get_webview_panel("main") {
+            panel.hide();
+        }
+    });
+    panel.set_event_handler(Some(event_handler.as_ref()));
+}
+
+/// Position the panel below the tray icon and show it.
+#[cfg(target_os = "macos")]
+fn show_panel(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Some((pos, size)) = *app.state::<TrayRect>().0.lock().unwrap() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let panel_w = window.outer_size().map(|s| s.width as f64).unwrap_or(420.0 * scale);
+            let x = pos.x + size.width / 2.0 - panel_w / 2.0;
+            let y = pos.y + size.height;
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        }
+    }
+    if let Ok(panel) = app.get_webview_panel("main") {
+        panel.show_and_make_key();
+    }
+}
+
+fn store_tray_rect(app: &tauri::AppHandle, event: &TrayIconEvent) {
+    let rect = match event {
+        TrayIconEvent::Click { rect, .. }
+        | TrayIconEvent::Enter { rect, .. }
+        | TrayIconEvent::Move { rect, .. } => rect,
+        _ => return,
+    };
+    *app.state::<TrayRect>().0.lock().unwrap() = Some((
+        rect.position.to_physical(1.0),
+        rect.size.to_physical(1.0),
+    ));
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_nspanel::init())
+        .manage(TrayRect(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
@@ -37,27 +113,18 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
-                        "show" => {
-                            if let Some(w) = app.get_webview_window("main") {
-                                let _ = w.move_window(Position::TrayCenter);
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
-                        }
+                        "show" => show_panel(app),
                         "settings" => {
-                            if let Some(w) = app.get_webview_window("main") {
-                                let _ = w.move_window(Position::TrayCenter);
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                                let _ = app.emit("open-settings", ());
-                            }
+                            show_panel(app);
+                            let _ = app.emit("open-settings", ());
                         }
                         "quit" => app.exit(0),
                         _ => {}
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+                    let app = tray.app_handle();
+                    store_tray_rect(app, &event);
 
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
@@ -65,28 +132,15 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(webview_window) = app.get_webview_window("main") {
-                            if webview_window.is_visible().unwrap_or(false) {
-                                let _ = webview_window.hide();
-                            } else {
-                                let _ = webview_window.move_window(Position::TrayCenter);
-                                let _ = webview_window.show();
-                                let _ = webview_window.set_focus();
-                            }
+                        if let Ok(panel) = app.get_webview_panel("main") {
+                            if panel.is_visible() { panel.hide(); } else { show_panel(app); }
                         }
                     }
                 })
                 .build(app)?;
 
-            if let Some(window) = app.get_webview_window("main") {
-                let win = window.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Focused(false) = event {
-                        let _ = win.hide();
-                    }
-                });
-            }
+            #[cfg(target_os = "macos")]
+            init_panel(app.handle());
 
             Ok(())
         })

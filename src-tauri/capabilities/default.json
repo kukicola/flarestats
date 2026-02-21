@@ -4,8 +4,6 @@
   "description": "Capability for the main window",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "core:window:allow-set-size",
-    "positioner:default"
+    "core:default"
   ]
 }

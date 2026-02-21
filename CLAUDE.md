@@ -22,7 +22,7 @@ npm run build              # Frontend-only build (tsc + vite build)
 
 **Backend (`src-tauri/src/`):**
 - `main.rs` → delegates to `lib.rs` `run()`
-- `lib.rs` — Tauri builder, plugin wiring, tray icon/menu setup, window events
+- `lib.rs` — Tauri builder, tray icon/menu setup, NSPanel init/positioning via `tauri-nspanel` plugin
 - `commands.rs` — all business logic: settings persistence (JSON in app data dir), Cloudflare REST API (site list), Cloudflare GraphQL API (analytics via `rumPageloadEventsAdaptiveGroups`), time series gap-filling. Sites are fetched concurrently with `futures::join_all`.
 
 **IPC:** Frontend calls Rust via `invoke()` from `@tauri-apps/api/core` (`get_settings`, `save_settings`, `fetch_analytics`). Tray menu emits `open-settings` event listened to by the frontend.
@@ -30,7 +30,9 @@ npm run build              # Frontend-only build (tsc + vite build)
 ## Key Patterns
 
 - Settings auto-save on `change` events (no save button)
-- Window toggles visibility on tray icon click; auto-refreshes data on focus
+- Window is an NSPanel (via `tauri-nspanel`) so it appears over fullscreen apps; positioned manually below tray icon using rect from `TrayIconEvent`
+- Panel toggles visibility on tray icon click; auto-refreshes data on DOM `focus` event (Tauri's `onFocusChanged` doesn't fire for NSPanel)
+- Tray icon uses `icon_as_template(true)` — icon must be pure black with alpha=255 for correct macOS rendering
 - Rust tests are inline `#[cfg(test)]` in `commands.rs`; TS tests in `utils.test.ts`
 - No ESLint/Prettier configured
 - CI runs on GitHub Actions (ubuntu-latest): `npm ci`, `npm test`, `npm run build`, `cargo test`
