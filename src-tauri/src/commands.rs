@@ -13,10 +13,16 @@ pub struct Settings {
     pub period: String,
     #[serde(default = "default_true")]
     pub exclude_bots: bool,
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_theme() -> String {
+    "auto".to_string()
 }
 
 impl Default for Settings {
@@ -26,6 +32,7 @@ impl Default for Settings {
             account_id: String::new(),
             period: String::new(),
             exclude_bots: true,
+            theme: "auto".to_string(),
         }
     }
 }

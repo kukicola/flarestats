@@ -11,6 +11,7 @@ interface Settings {
   account_id: string;
   period: string;
   exclude_bots: boolean;
+  theme: string;
 }
 
 interface SeriesPoint {
@@ -31,6 +32,42 @@ let charts: Chart[] = [];
 let cachedData: SiteData[] | null = null;
 let currentView: "dashboard" | "settings" = "dashboard";
 let isLoading = false;
+let systemDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+let currentTheme = "auto";
+
+function applyTheme(theme: string) {
+  currentTheme = theme;
+  const html = document.documentElement;
+  const wasDark = html.classList.contains("dark");
+
+  // Remove old listener
+  systemDarkQuery.removeEventListener("change", onSystemThemeChange);
+
+  if (theme === "dark") {
+    html.classList.add("dark");
+  } else if (theme === "light") {
+    html.classList.remove("dark");
+  } else {
+    // auto
+    if (systemDarkQuery.matches) {
+      html.classList.add("dark");
+    } else {
+      html.classList.remove("dark");
+    }
+    systemDarkQuery.addEventListener("change", onSystemThemeChange);
+  }
+
+  const isDarkNow = html.classList.contains("dark");
+  if (wasDark !== isDarkNow && cachedData) {
+    renderSites(cachedData);
+  }
+}
+
+function onSystemThemeChange() {
+  if (currentTheme === "auto") {
+    applyTheme("auto");
+  }
+}
 
 function popover(inner: string): string {
   return `
@@ -43,6 +80,7 @@ function popover(inner: string): string {
 
 async function init() {
   const settings = await invoke<Settings>("get_settings");
+  applyTheme(settings.theme || "auto");
   if (!settings.token || !settings.account_id) {
     showSettings();
   } else {
@@ -235,7 +273,7 @@ function createChart(canvas: HTMLCanvasElement, series: SeriesPoint[]) {
   const visitsData = series.map((p) => p.visits);
   const extraViewsData = series.map((p) => Math.max(0, p.page_views - p.visits));
 
-  const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const isDark = document.documentElement.classList.contains("dark");
 
   const chart = new Chart(canvas, {
     type: "bar",
@@ -245,14 +283,14 @@ function createChart(canvas: HTMLCanvasElement, series: SeriesPoint[]) {
         {
           label: "Visits",
           data: visitsData,
-          backgroundColor: isDark ? "rgba(10, 132, 255, 0.7)" : "rgba(0, 122, 255, 0.55)",
+          backgroundColor: isDark ? "rgba(88, 166, 255, 0.8)" : "rgba(0, 122, 255, 0.55)",
           borderRadius: 1,
           borderSkipped: false,
         },
         {
           label: "Extra Views",
           data: extraViewsData,
-          backgroundColor: isDark ? "rgba(191, 90, 242, 0.6)" : "rgba(175, 82, 222, 0.45)",
+          backgroundColor: isDark ? "rgba(210, 168, 255, 0.7)" : "rgba(175, 82, 222, 0.45)",
           borderRadius: { topLeft: 1, topRight: 1, bottomLeft: 0, bottomRight: 0 },
           borderSkipped: false,
         },
@@ -303,7 +341,7 @@ async function showSettings() {
   try {
     settings = await invoke<Settings>("get_settings");
   } catch {
-    settings = { token: "", account_id: "", period: "24h", exclude_bots: true };
+    settings = { token: "", account_id: "", period: "24h", exclude_bots: true, theme: "auto" };
   }
 
   app.innerHTML = popover(`
@@ -334,17 +372,47 @@ async function showSettings() {
           </div>
         </div>
         <div class="form-group">
+          <label>Color Scheme</label>
+          <div class="period-selector" id="theme-selector">
+            <button class="period-btn ${(settings.theme || "auto") === "auto" ? "active" : ""}" data-theme="auto">Auto</button>
+            <button class="period-btn ${settings.theme === "light" ? "active" : ""}" data-theme="light">Light</button>
+            <button class="period-btn ${settings.theme === "dark" ? "active" : ""}" data-theme="dark">Dark</button>
+          </div>
+        </div>
+        <div class="form-group">
           <label class="toggle-row">
             <span>Exclude Bots</span>
             <input type="checkbox" id="input-exclude-bots" ${settings.exclude_bots !== false ? "checked" : ""} />
           </label>
         </div>
-        <button class="btn btn-primary" id="save-btn">Save</button>
       </div>
     </div>
   `);
 
   let selectedPeriod = settings.period || "24h";
+  let selectedTheme = settings.theme || "auto";
+  let prevPeriod = selectedPeriod;
+
+  async function autoSave() {
+    const token = (document.getElementById("input-token") as HTMLInputElement).value.trim();
+    const accountId = (document.getElementById("input-account-id") as HTMLInputElement).value.trim();
+    const excludeBots = (document.getElementById("input-exclude-bots") as HTMLInputElement).checked;
+    try {
+      await invoke("save_settings", {
+        settings: {
+          token,
+          account_id: accountId,
+          period: selectedPeriod,
+          exclude_bots: excludeBots,
+          theme: selectedTheme,
+        },
+      });
+      if (selectedPeriod !== prevPeriod) {
+        prevPeriod = selectedPeriod;
+        cachedData = null;
+      }
+    } catch { /* ignore save errors silently */ }
+  }
 
   document.getElementById("back-btn")!.addEventListener("click", () => {
     if (settings.token && settings.account_id) {
@@ -352,39 +420,28 @@ async function showSettings() {
     }
   });
 
-  document.querySelectorAll<HTMLButtonElement>(".period-btn").forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>(".period-selector:not(#theme-selector) .period-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".period-btn").forEach((b) => b.classList.remove("active"));
+      btn.parentElement!.querySelectorAll(".period-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       selectedPeriod = btn.dataset.period!;
+      autoSave();
     });
   });
 
-  document.getElementById("save-btn")!.addEventListener("click", async () => {
-    const token = (document.getElementById("input-token") as HTMLInputElement).value.trim();
-    const accountId = (document.getElementById("input-account-id") as HTMLInputElement).value.trim();
-
-    if (!token || !accountId) {
-      alert("Please fill in both API Token and Account ID");
-      return;
-    }
-
-    try {
-      const excludeBots = (document.getElementById("input-exclude-bots") as HTMLInputElement).checked;
-      await invoke("save_settings", {
-        settings: {
-          token,
-          account_id: accountId,
-          period: selectedPeriod,
-          exclude_bots: excludeBots,
-        },
-      });
-      cachedData = null;
-      showDashboard();
-    } catch (e) {
-      alert("Failed to save settings: " + e);
-    }
+  document.querySelectorAll<HTMLButtonElement>("#theme-selector .period-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#theme-selector .period-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedTheme = btn.dataset.theme!;
+      applyTheme(selectedTheme);
+      autoSave();
+    });
   });
+
+  (document.getElementById("input-exclude-bots") as HTMLInputElement).addEventListener("change", () => autoSave());
+  document.getElementById("input-token")!.addEventListener("change", () => autoSave());
+  document.getElementById("input-account-id")!.addEventListener("change", () => autoSave());
 }
 
 function escapeHtml(s: string): string {
