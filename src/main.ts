@@ -283,14 +283,14 @@ function createChart(canvas: HTMLCanvasElement, series: SeriesPoint[]) {
         {
           label: "Visits",
           data: visitsData,
-          backgroundColor: isDark ? "rgba(88, 166, 255, 0.8)" : "rgba(0, 122, 255, 0.55)",
+          backgroundColor: isDark ? "rgba(255, 196, 0, 0.8)" : "rgba(230, 168, 0, 0.55)",
           borderRadius: 1,
           borderSkipped: false,
         },
         {
           label: "Extra Views",
           data: extraViewsData,
-          backgroundColor: isDark ? "rgba(210, 168, 255, 0.7)" : "rgba(175, 82, 222, 0.45)",
+          backgroundColor: isDark ? "rgba(255, 149, 0, 0.7)" : "rgba(230, 120, 0, 0.45)",
           borderRadius: { topLeft: 1, topRight: 1, bottomLeft: 0, bottomRight: 0 },
           borderSkipped: false,
         },
@@ -365,7 +365,7 @@ async function showSettings() {
         </div>
         <div class="form-group">
           <label>Time Period</label>
-          <div class="period-selector">
+          <div class="period-selector" id="period-selector">
             <button class="period-btn ${settings.period === "24h" ? "active" : ""}" data-period="24h">24 Hours</button>
             <button class="period-btn ${settings.period === "7d" ? "active" : ""}" data-period="7d">7 Days</button>
             <button class="period-btn ${settings.period === "30d" ? "active" : ""}" data-period="30d">30 Days</button>
@@ -380,37 +380,26 @@ async function showSettings() {
           </div>
         </div>
         <div class="form-group">
-          <label class="toggle-row">
-            <span>Exclude Bots</span>
-            <input type="checkbox" id="input-exclude-bots" ${settings.exclude_bots !== false ? "checked" : ""} />
-          </label>
+          <label>Exclude Bots</label>
+          <div class="period-selector" id="bots-selector">
+            <button class="period-btn ${settings.exclude_bots !== false ? "active" : ""}" data-bots="yes">Yes</button>
+            <button class="period-btn ${settings.exclude_bots === false ? "active" : ""}" data-bots="no">No</button>
+          </div>
         </div>
       </div>
     </div>
   `);
 
-  let selectedPeriod = settings.period || "24h";
-  let selectedTheme = settings.theme || "auto";
-  let prevPeriod = selectedPeriod;
-
   async function autoSave() {
     const token = (document.getElementById("input-token") as HTMLInputElement).value.trim();
     const accountId = (document.getElementById("input-account-id") as HTMLInputElement).value.trim();
-    const excludeBots = (document.getElementById("input-exclude-bots") as HTMLInputElement).checked;
+    const period = document.querySelector("#period-selector .period-btn.active")?.getAttribute("data-period") || "24h";
+    const theme = document.querySelector("#theme-selector .period-btn.active")?.getAttribute("data-theme") || "auto";
+    const excludeBots = document.querySelector("#bots-selector .period-btn.active")?.getAttribute("data-bots") === "yes";
     try {
       await invoke("save_settings", {
-        settings: {
-          token,
-          account_id: accountId,
-          period: selectedPeriod,
-          exclude_bots: excludeBots,
-          theme: selectedTheme,
-        },
+        settings: { token, account_id: accountId, period, exclude_bots: excludeBots, theme },
       });
-      if (selectedPeriod !== prevPeriod) {
-        prevPeriod = selectedPeriod;
-        cachedData = null;
-      }
     } catch { /* ignore save errors silently */ }
   }
 
@@ -420,26 +409,15 @@ async function showSettings() {
     }
   });
 
-  document.querySelectorAll<HTMLButtonElement>(".period-selector:not(#theme-selector) .period-btn").forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>(".period-selector .period-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       btn.parentElement!.querySelectorAll(".period-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      selectedPeriod = btn.dataset.period!;
+      if (btn.dataset.theme) applyTheme(btn.dataset.theme);
       autoSave();
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>("#theme-selector .period-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#theme-selector .period-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      selectedTheme = btn.dataset.theme!;
-      applyTheme(selectedTheme);
-      autoSave();
-    });
-  });
-
-  (document.getElementById("input-exclude-bots") as HTMLInputElement).addEventListener("change", () => autoSave());
   document.getElementById("input-token")!.addEventListener("change", () => autoSave());
   document.getElementById("input-account-id")!.addEventListener("change", () => autoSave());
 }
