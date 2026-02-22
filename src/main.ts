@@ -282,14 +282,14 @@ function createChart(canvas: HTMLCanvasElement, series: SeriesPoint[]) {
         {
           label: "Visits",
           data: visitsData,
-          backgroundColor: isDark ? "rgba(255, 196, 0, 0.8)" : "rgba(230, 168, 0, 0.55)",
+          backgroundColor: isDark ? "#ffc400" : "#e6a800",
           borderRadius: 1,
           borderSkipped: false,
         },
         {
           label: "Extra Views",
           data: extraViewsData,
-          backgroundColor: isDark ? "rgba(255, 149, 0, 0.7)" : "rgba(230, 120, 0, 0.45)",
+          backgroundColor: isDark ? "#ff9500" : "#e67800",
           borderRadius: { topLeft: 1, topRight: 1, bottomLeft: 0, bottomRight: 0 },
           borderSkipped: false,
         },
