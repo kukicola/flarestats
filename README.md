@@ -2,6 +2,13 @@
 
 A macOS menu bar app for monitoring Cloudflare Web Analytics across all your sites. Built with [Tauri 2](https://tauri.app/) + TypeScript + Rust.
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/dark.png" alt="Dark mode" width="380">
+  <img src="screenshots/light.png" alt="Light mode" width="380">
+</p>
+
 ## Features
 
 - Lives in the menu bar — click the tray icon to view analytics
