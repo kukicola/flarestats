@@ -10,6 +10,7 @@ interface Settings {
   period: string;
   exclude_bots: boolean;
   theme: string;
+  refresh_interval: string;
 }
 
 interface SeriesPoint {
@@ -28,10 +29,12 @@ interface SiteData {
 const app = document.getElementById("app")!;
 let charts: Chart[] = [];
 let cachedData: SiteData[] | null = null;
-let currentView: "dashboard" | "settings" = "dashboard";
 let isLoading = false;
 let systemDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 let currentTheme = "auto";
+let refreshTimer: number | null = null;
+let lastRefreshedAt: number | null = null;
+let refreshAgoTimer: number | null = null;
 
 function applyTheme(theme: string) {
   currentTheme = theme;
@@ -76,9 +79,61 @@ function popover(inner: string): string {
   `;
 }
 
+function parseIntervalMs(interval: string): number {
+  switch (interval) {
+    case "5m": return 300_000;
+    case "15m": return 900_000;
+    case "60m": return 3_600_000;
+    default: return 900_000;
+  }
+}
+
+function startRefreshTimer(intervalStr: string) {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  const ms = parseIntervalMs(intervalStr);
+  refreshTimer = window.setInterval(() => {
+    loadAnalytics();
+  }, ms);
+}
+
+function updateRefreshAgo() {
+  const el = document.querySelector(".refresh-ago");
+  if (!el) return;
+  if (lastRefreshedAt === null) {
+    el.textContent = "";
+    return;
+  }
+  const diff = Date.now() - lastRefreshedAt;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) {
+    el.textContent = "now";
+  } else if (mins < 60) {
+    el.textContent = `${mins}m ago`;
+  } else {
+    el.textContent = `${Math.floor(mins / 60)}h ago`;
+  }
+}
+
+function startRefreshAgoTimer() {
+  stopRefreshAgoTimer();
+  updateRefreshAgo();
+  refreshAgoTimer = window.setInterval(updateRefreshAgo, 30_000);
+}
+
+function stopRefreshAgoTimer() {
+  if (refreshAgoTimer !== null) {
+    clearInterval(refreshAgoTimer);
+    refreshAgoTimer = null;
+  }
+}
+
 async function init() {
   const settings = await invoke<Settings>("get_settings");
   applyTheme(settings.theme || "auto");
+  startRefreshTimer(settings.refresh_interval || "15m");
   if (!settings.token || !settings.account_id) {
     showSettings();
   } else {
@@ -88,23 +143,21 @@ async function init() {
   // NSPanel doesn't trigger Tauri's onFocusChanged, use DOM focus event
   window.addEventListener("focus", () => {
     (document.activeElement as HTMLElement)?.blur();
-    if (currentView === "dashboard") {
-      loadAnalytics();
-    }
   });
 
   listen("open-settings", () => showSettings());
 }
 
 function showDashboard() {
-  currentView = "dashboard";
   destroyCharts();
+  startRefreshAgoTimer();
 
   app.innerHTML = popover(`
     <div class="header">
       <h1>FlareStats</h1>
       <div class="header-actions">
         <button class="icon-btn" id="refresh-btn" title="Refresh">
+          <span class="refresh-ago"></span>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M13.5 8a5.5 5.5 0 11-1.3-3.56"/>
             <path d="M13.5 2.5v3h-3"/>
@@ -158,7 +211,9 @@ async function loadAnalytics() {
   try {
     const data = await invoke<SiteData[]>("fetch_analytics");
     cachedData = data;
+    lastRefreshedAt = Date.now();
     renderSites(data);
+    updateRefreshAgo();
   } catch (e) {
     if (!cachedData) {
       content.innerHTML = `
@@ -333,14 +388,14 @@ function destroyCharts() {
 }
 
 async function showSettings() {
-  currentView = "settings";
   destroyCharts();
+  stopRefreshAgoTimer();
 
   let settings: Settings;
   try {
     settings = await invoke<Settings>("get_settings");
   } catch {
-    settings = { token: "", account_id: "", period: "24h", exclude_bots: true, theme: "auto" };
+    settings = { token: "", account_id: "", period: "24h", exclude_bots: true, theme: "auto", refresh_interval: "15m" };
   }
 
   app.innerHTML = popover(`
@@ -385,6 +440,14 @@ async function showSettings() {
             <button class="period-btn ${settings.exclude_bots === false ? "active" : ""}" data-bots="no">No</button>
           </div>
         </div>
+        <div class="form-group">
+          <label>Refresh Interval</label>
+          <div class="period-selector" id="refresh-selector">
+            <button class="period-btn ${(settings.refresh_interval || "15m") === "5m" ? "active" : ""}" data-refresh="5m">5 Min</button>
+            <button class="period-btn ${(settings.refresh_interval || "15m") === "15m" ? "active" : ""}" data-refresh="15m">15 Min</button>
+            <button class="period-btn ${(settings.refresh_interval || "15m") === "60m" ? "active" : ""}" data-refresh="60m">1 Hour</button>
+          </div>
+        </div>
       </div>
     </div>
   `);
@@ -395,10 +458,12 @@ async function showSettings() {
     const period = document.querySelector("#period-selector .period-btn.active")?.getAttribute("data-period") || "24h";
     const theme = document.querySelector("#theme-selector .period-btn.active")?.getAttribute("data-theme") || "auto";
     const excludeBots = document.querySelector("#bots-selector .period-btn.active")?.getAttribute("data-bots") === "yes";
+    const refreshInterval = document.querySelector("#refresh-selector .period-btn.active")?.getAttribute("data-refresh") || "15m";
     try {
       await invoke("save_settings", {
-        settings: { token, account_id: accountId, period, exclude_bots: excludeBots, theme },
+        settings: { token, account_id: accountId, period, exclude_bots: excludeBots, theme, refresh_interval: refreshInterval },
       });
+      startRefreshTimer(refreshInterval);
     } catch { /* ignore save errors silently */ }
   }
 

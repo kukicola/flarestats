@@ -15,6 +15,8 @@ pub struct Settings {
     pub exclude_bots: bool,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_refresh_interval")]
+    pub refresh_interval: String,
 }
 
 fn default_true() -> bool {
@@ -25,6 +27,10 @@ fn default_theme() -> String {
     "auto".to_string()
 }
 
+fn default_refresh_interval() -> String {
+    "15m".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -33,6 +39,7 @@ impl Default for Settings {
             period: String::new(),
             exclude_bots: true,
             theme: "auto".to_string(),
+            refresh_interval: "15m".to_string(),
         }
     }
 }
