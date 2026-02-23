@@ -324,8 +324,13 @@ fn fill_series_gaps(
             .unwrap_or_default();
         let end_dt = NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M:%SZ")
             .unwrap_or_default();
+        let end_hour = end_dt
+            .with_minute(0)
+            .unwrap_or(end_dt)
+            .with_second(0)
+            .unwrap_or(end_dt);
         let mut current = start_dt;
-        while current <= end_dt {
+        while current <= end_hour {
             let key = current.format("%Y-%m-%dT%H:%M:%SZ").to_string();
             let (v, pv) = data.get(&key).copied().unwrap_or((0, 0));
             series.push(SeriesPoint {
@@ -361,7 +366,7 @@ fn get_time_range(period: &str) -> (String, String, &'static str) {
 
     match period {
         "24h" => {
-            let start = (now - chrono::Duration::hours(24))
+            let start = (now - chrono::Duration::hours(23))
                 .with_minute(0)
                 .unwrap()
                 .with_second(0)
@@ -409,7 +414,7 @@ mod tests {
         let start_dt = NaiveDateTime::parse_from_str(&start, "%Y-%m-%dT%H:%M:%SZ").unwrap();
         let end_dt = NaiveDateTime::parse_from_str(&end, "%Y-%m-%dT%H:%M:%SZ").unwrap();
         let diff = end_dt - start_dt;
-        assert!(diff >= Duration::hours(23) && diff <= Duration::hours(25));
+        assert!(diff >= Duration::hours(22) && diff <= Duration::hours(24));
         // start should have minutes/seconds zeroed
         assert_eq!(start_dt.minute(), 0);
         assert_eq!(start_dt.second(), 0);
@@ -454,18 +459,18 @@ mod tests {
         ]);
         let series = fill_series_gaps(
             "2024-01-15T00:00:00Z",
-            "2024-01-15T03:00:00Z",
+            "2024-01-15T03:30:00Z",
             "datetimeHour",
             &data,
         );
-        assert_eq!(series.len(), 4); // 00, 01, 02, 03
+        assert_eq!(series.len(), 4); // 00, 01, 02, 03 (end truncated to 03:00)
         assert_eq!(series[0].visits, 10);
         assert_eq!(series[0].page_views, 20);
         assert_eq!(series[1].visits, 0); // gap filled
         assert_eq!(series[1].page_views, 0);
         assert_eq!(series[2].visits, 30);
         assert_eq!(series[2].page_views, 40);
-        assert_eq!(series[3].visits, 0); // gap filled
+        assert_eq!(series[3].visits, 0); // current hour
     }
 
     #[test]
@@ -492,11 +497,11 @@ mod tests {
         let data: HashMap<String, (u64, u64)> = HashMap::new();
         let series = fill_series_gaps(
             "2024-01-15T00:00:00Z",
-            "2024-01-15T02:00:00Z",
+            "2024-01-15T02:30:00Z",
             "datetimeHour",
             &data,
         );
-        assert_eq!(series.len(), 3);
+        assert_eq!(series.len(), 3); // 00, 01, 02 (end truncated to 02:00)
         assert!(series.iter().all(|p| p.visits == 0 && p.page_views == 0));
     }
 
