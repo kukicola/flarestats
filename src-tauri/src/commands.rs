@@ -4,7 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::task::JoinHandle;
+
+pub struct RefreshTask(pub Mutex<Option<JoinHandle<()>>>);
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Settings {
@@ -89,9 +93,8 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     fs::write(&path, data).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub async fn fetch_analytics(app: AppHandle) -> Result<Vec<SiteData>, String> {
-    let settings = get_settings(app)?;
+async fn fetch_analytics_inner(app: &AppHandle) -> Result<Vec<SiteData>, String> {
+    let settings = get_settings(app.clone())?;
     if settings.token.is_empty() || settings.account_id.is_empty() {
         return Err("Please configure API token and Account ID in settings".to_string());
     }
@@ -126,6 +129,48 @@ pub async fn fetch_analytics(app: AppHandle) -> Result<Vec<SiteData>, String> {
     sites_data.sort_by(|a, b| b.visits.cmp(&a.visits));
 
     Ok(sites_data)
+}
+
+#[tauri::command]
+pub async fn fetch_analytics(app: AppHandle) -> Result<Vec<SiteData>, String> {
+    fetch_analytics_inner(&app).await
+}
+
+fn parse_interval_ms(interval: &str) -> u64 {
+    match interval {
+        "5m" => 300_000,
+        "15m" => 900_000,
+        "60m" => 3_600_000,
+        _ => 900_000,
+    }
+}
+
+#[tauri::command]
+pub async fn start_background_refresh(app: AppHandle) -> Result<(), String> {
+    let settings = get_settings(app.clone())?;
+    let interval_ms = parse_interval_ms(&settings.refresh_interval);
+
+    let state = app.state::<RefreshTask>();
+    let mut handle = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(h) = handle.take() {
+        h.abort();
+    }
+
+    let app_clone = app.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+            match fetch_analytics_inner(&app_clone).await {
+                Ok(data) => {
+                    let _ = app_clone.emit("analytics-refreshed", data);
+                }
+                Err(e) => eprintln!("Background refresh error: {}", e),
+            }
+        }
+    });
+
+    *handle = Some(task);
+    Ok(())
 }
 
 async fn fetch_sites(
@@ -501,5 +546,27 @@ mod tests {
         let json = r#"{"token":"t","account_id":"a","period":"24h","exclude_bots":false}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(!settings.exclude_bots);
+    }
+
+    // --- parse_interval_ms tests ---
+
+    #[test]
+    fn test_parse_interval_ms_known_values() {
+        assert_eq!(parse_interval_ms("5m"), 300_000);
+        assert_eq!(parse_interval_ms("15m"), 900_000);
+        assert_eq!(parse_interval_ms("60m"), 3_600_000);
+    }
+
+    #[test]
+    fn test_parse_interval_ms_unknown_defaults_to_15m() {
+        assert_eq!(parse_interval_ms("unknown"), 900_000);
+        assert_eq!(parse_interval_ms(""), 900_000);
+    }
+
+    #[test]
+    fn test_settings_deserialize_missing_refresh_interval_defaults() {
+        let json = r#"{"token":"t","account_id":"a","period":"24h"}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.refresh_interval, "15m");
     }
 }

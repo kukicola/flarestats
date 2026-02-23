@@ -88,10 +88,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_nspanel::init())
         .manage(TrayRect(Mutex::new(None)))
+        .manage(commands::RefreshTask(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
             commands::fetch_analytics,
+            commands::start_background_refresh,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

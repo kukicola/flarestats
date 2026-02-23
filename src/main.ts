@@ -32,7 +32,6 @@ let cachedData: SiteData[] | null = null;
 let isLoading = false;
 let systemDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 let currentTheme = "auto";
-let refreshTimer: number | null = null;
 let lastRefreshedAt: number | null = null;
 let refreshAgoTimer: number | null = null;
 
@@ -79,24 +78,10 @@ function popover(inner: string): string {
   `;
 }
 
-function parseIntervalMs(interval: string): number {
-  switch (interval) {
-    case "5m": return 300_000;
-    case "15m": return 900_000;
-    case "60m": return 3_600_000;
-    default: return 900_000;
-  }
-}
-
-function startRefreshTimer(intervalStr: string) {
-  if (refreshTimer !== null) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
-  const ms = parseIntervalMs(intervalStr);
-  refreshTimer = window.setInterval(() => {
-    loadAnalytics();
-  }, ms);
+async function startBackgroundRefresh() {
+  try {
+    await invoke("start_background_refresh");
+  } catch { /* ignore */ }
 }
 
 function updateRefreshAgo() {
@@ -120,7 +105,7 @@ function updateRefreshAgo() {
 function startRefreshAgoTimer() {
   stopRefreshAgoTimer();
   updateRefreshAgo();
-  refreshAgoTimer = window.setInterval(updateRefreshAgo, 30_000);
+  refreshAgoTimer = window.setInterval(updateRefreshAgo, 5_000);
 }
 
 function stopRefreshAgoTimer() {
@@ -133,7 +118,7 @@ function stopRefreshAgoTimer() {
 async function init() {
   const settings = await invoke<Settings>("get_settings");
   applyTheme(settings.theme || "auto");
-  startRefreshTimer(settings.refresh_interval || "15m");
+  await startBackgroundRefresh();
   if (!settings.token || !settings.account_id) {
     showSettings();
   } else {
@@ -143,6 +128,17 @@ async function init() {
   // NSPanel doesn't trigger Tauri's onFocusChanged, use DOM focus event
   window.addEventListener("focus", () => {
     (document.activeElement as HTMLElement)?.blur();
+    updateRefreshAgo();
+  });
+
+  listen<SiteData[]>("analytics-refreshed", (event) => {
+    cachedData = event.payload;
+    lastRefreshedAt = Date.now();
+    const content = document.getElementById("dashboard-content");
+    if (content) {
+      renderSites(event.payload);
+    }
+    updateRefreshAgo();
   });
 
   listen("open-settings", () => showSettings());
@@ -463,7 +459,7 @@ async function showSettings() {
       await invoke("save_settings", {
         settings: { token, account_id: accountId, period, exclude_bots: excludeBots, theme, refresh_interval: refreshInterval },
       });
-      startRefreshTimer(refreshInterval);
+      await startBackgroundRefresh();
     } catch { /* ignore save errors silently */ }
   }
 
